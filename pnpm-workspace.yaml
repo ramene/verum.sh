@@ -1,0 +1,3 @@
+# Anchor verum.sh as its own pnpm workspace root.
+# Prevents the parent ~/.remote/pnpm-workspace.yaml from absorbing this repo.
+packages: []
