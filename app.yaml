@@ -1,7 +1,6 @@
 runtime: nodejs22
 service: default
 
-# F1 instance: 256MB RAM, 600MHz CPU — plenty for this landing site
 instance_class: F1
 
 automatic_scaling:

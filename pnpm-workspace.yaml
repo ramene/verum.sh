@@ -1,3 +1,16 @@
 # Anchor verum.sh as its own pnpm workspace root.
 # Prevents the parent ~/.remote/pnpm-workspace.yaml from absorbing this repo.
 packages: []
+
+# Pin transitive deps to known-stable versions that have aged past GAE
+# buildpack's minimum-release-age check (default 12h). Same versions
+# apps/web's monorepo lockfile uses successfully.
+overrides:
+  baseline-browser-mapping: '2.10.0'
+  caniuse-lite: '1.0.30001774'
+  enhanced-resolve: '5.18.3'
+
+# verum.sh is a landing site, does NOT use next/image. sharp's prebuilt
+# native binary download is dead weight. Skip it.
+ignoredOptionalDependencies:
+  - sharp
