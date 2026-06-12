@@ -1,27 +1,24 @@
 #!/usr/bin/env bash
-# verum.sh — one-shot GCP bootstrap.
+# verum.sh — GCP bootstrap (App Engine + Route 53).
 #
-# DNS lives in AWS Route 53 (same pattern as micropayments.to / .ai / .id).
-# This script handles ONLY the GCP side: project, billing, APIs, Cloud Run
-# build/deploy, domain mapping. AFTER the script, it prints the exact
-# Route 53 records to add via:
-#   aws route53 change-resource-record-sets --hosted-zone-id Z036423752F97VU7GU3K ...
+# Mirrors the apps/web GAE pattern from builds.karve.ai:
+#   - Next.js + nodejs22 GAE runtime, scale-to-zero
+#   - DNS in AWS Route 53 (verum.sh zone Z036423752F97VU7GU3K already exists)
+#   - SSL via gcloud app domain-mappings --certificate-management=AUTOMATIC
 #
 # Run AFTER:
 #   - gcloud auth login
 #   - gcloud auth application-default login
-#   - VERUM_BILLING_ACCOUNT env var set (gcloud beta billing accounts list)
+#   - VERUM_BILLING_ACCOUNT env var set
 #
 # Idempotent: re-running skips steps that already succeeded.
 
 set -euo pipefail
 
-# ─── Config (override via env) ──────────────────────────────────────
 PROJECT_ID="${VERUM_GCP_PROJECT:-mae-stack-prod}"
-REGION="${VERUM_GCP_REGION:-us-central1}"
-SERVICE="${VERUM_GCP_SERVICE:-verum-sh}"
-REPO="${VERUM_GCP_REPO:-verum-sh}"
+REGION="${VERUM_GCP_REGION:-us-central}"   # NOTE: GAE region is 'us-central' not 'us-central1'
 DOMAIN="${VERUM_DOMAIN:-verum.sh}"
+ROUTE53_ZONE_ID="${VERUM_ROUTE53_ZONE:-Z036423752F97VU7GU3K}"
 BILLING_ACCOUNT="${VERUM_BILLING_ACCOUNT:?Set VERUM_BILLING_ACCOUNT to your billing account ID (gcloud beta billing accounts list)}"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
@@ -47,70 +44,71 @@ else
 fi
 
 # ─── 3. APIs ────────────────────────────────────────────────────────
-# NOTE: dns.googleapis.com NOT enabled — DNS lives in AWS Route 53.
 bold "Enabling required APIs"
 gcloud services enable \
-  cloudbuild.googleapis.com \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com
+  appengine.googleapis.com \
+  appenginereporting.googleapis.com \
+  cloudbuild.googleapis.com
 
-# ─── 4. Artifact Registry ───────────────────────────────────────────
-if ! gcloud artifacts repositories describe "$REPO" --location="$REGION" >/dev/null 2>&1; then
-  bold "Creating Artifact Registry: $REPO"
-  gcloud artifacts repositories create "$REPO" \
-    --repository-format=docker \
-    --location="$REGION" \
-    --description="verum.sh Docker images"
+# ─── 4. Initialize App Engine application ──────────────────────────
+if ! gcloud app describe >/dev/null 2>&1; then
+  bold "Creating App Engine application in $REGION"
+  gcloud app create --region="$REGION"
 else
-  muted "Repo $REPO exists, skipping"
+  muted "App Engine app exists, skipping create"
 fi
 
-# ─── 5. Domain verification check ──────────────────────────────────
-# Cloud Run domain mapping requires that Google Search Console verifies
-# domain ownership FIRST. This must be done interactively at:
-#   https://search.google.com/search-console/welcome
-# enter "verum.sh", select "Domain" property, copy the TXT record value,
-# add to Route 53 (we print the aws cli below), then click VERIFY.
-# Skip the mapping step here if not yet verified.
+# ─── 5. Build Next.js locally before deploying ─────────────────────
+bold "Building verum.sh locally"
+( cd "$(dirname "$0")/.." && pnpm install --frozen-lockfile && NEXT_TELEMETRY_DISABLED=1 pnpm build )
 
-# ─── 6. First Cloud Build ──────────────────────────────────────────
-bold "Submitting first Cloud Build → Cloud Run deploy"
-muted "Subsequent builds happen on push to main once we set up the trigger."
-gcloud builds submit --config=cloudbuild.yaml .
+# ─── 6. Deploy to GAE ──────────────────────────────────────────────
+VERSION_ID="prod-$(date +%Y%m%d-%H%M%S)"
+bold "Deploying to App Engine: version $VERSION_ID"
+( cd "$(dirname "$0")/.." && gcloud app deploy app.yaml --quiet --promote --version="$VERSION_ID" )
 
-# Capture the Cloud Run URL so we can print it next to the DNS records.
-RUN_URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)' 2>/dev/null || echo '')"
+# Capture the GAE service URL
+GAE_URL="$(gcloud app describe --format='value(defaultHostname)')"
+muted "  → https://${GAE_URL}"
 
-# ─── 7. Cloud Run domain mapping (only if verified) ────────────────
-if gcloud beta run domain-mappings describe --domain="$DOMAIN" --region="$REGION" >/dev/null 2>&1; then
+# ─── 7. Domain mapping + auto SSL ──────────────────────────────────
+if gcloud app domain-mappings describe "$DOMAIN" >/dev/null 2>&1; then
   muted "Domain mapping for $DOMAIN exists, skipping"
 else
-  bold "Attempting to create domain mapping for $DOMAIN → $SERVICE"
-  if gcloud beta run domain-mappings create \
-      --service="$SERVICE" \
-      --domain="$DOMAIN" \
-      --region="$REGION" 2>&1; then
-    muted "Domain mapping created"
-  else
-    warn "Domain mapping failed — most likely $DOMAIN is not yet verified."
-    warn "Visit https://search.google.com/search-console, add domain $DOMAIN,"
-    warn "copy the TXT verification record, paste it into Route 53 (zone Z036423752F97VU7GU3K),"
-    warn "verify, then re-run this script."
+  bold "Creating domain mapping for $DOMAIN with automatic SSL"
+  if ! gcloud app domain-mappings create "$DOMAIN" \
+      --certificate-management=AUTOMATIC \
+      --quiet 2>&1; then
+    warn "Domain mapping failed."
+    warn "Most likely cause: $DOMAIN is not yet verified in Search Console."
+    warn "Visit https://search.google.com/search-console, add $DOMAIN as a Domain property,"
+    warn "copy the TXT verification record, add it to Route 53 zone $ROUTE53_ZONE_ID, click Verify,"
+    warn "then re-run this script."
+    exit 1
   fi
 fi
 
-# ─── 8. Print the Route 53 records to add ───────────────────────────
+# ─── 8. Print Route 53 records to add ──────────────────────────────
 echo
 bold "═══════════════════════════════════════════════════════════════════"
-bold "  Route 53 records to add for $DOMAIN (zone Z036423752F97VU7GU3K)"
+bold "  Route 53 records to add for $DOMAIN (zone $ROUTE53_ZONE_ID)"
 bold "═══════════════════════════════════════════════════════════════════"
-echo
-muted "Same pattern as micropayments.to apex → Google IPs."
-echo
-cat <<'EOF'
-APEX A records (4 records, all required):
-  Name:  verum.sh.
+
+# Get the DNS records GAE expects.
+MAPPING_JSON="$(gcloud app domain-mappings describe "$DOMAIN" --format=json)"
+echo "$MAPPING_JSON" | python3 -c '
+import json, sys
+m = json.load(sys.stdin)
+print()
+print("From GAE domain-mapping resource records:")
+print(json.dumps(m.get("resourceRecords", []), indent=2))
+print()
+'
+
+cat <<EOF
+
+APEX A records (the load-bearing 4):
+  Name:  $DOMAIN.
   Type:  A
   TTL:   300
   Value: 216.239.32.21
@@ -118,64 +116,62 @@ APEX A records (4 records, all required):
          216.239.36.21
          216.239.38.21
 
-WWW subdomain (optional convenience):
-  Name:  www.verum.sh.
+AAAA records (IPv6, optional but recommended):
+  Name:  $DOMAIN.
+  Type:  AAAA
+  TTL:   300
+  Value: 2001:4860:4802:32::15
+         2001:4860:4802:34::15
+         2001:4860:4802:36::15
+         2001:4860:4802:38::15
+
+WWW subdomain (optional):
+  Name:  www.$DOMAIN.
   Type:  CNAME
   TTL:   300
   Value: ghs.googlehosted.com.
-
-DOMAIN VERIFICATION TXT (if Search Console asks for one):
-  Name:  verum.sh.
-  Type:  TXT
-  TTL:   300
-  Value: "google-site-verification=<from-search-console>"
 EOF
+
 echo
 bold "═══════════════════════════════════════════════════════════════════"
 echo
-muted "Add via AWS console (Route 53 → Hosted zones → verum.sh) OR via:"
+muted "Add via AWS Route 53 console OR via aws cli:"
 echo
-cat <<'EOF'
-aws route53 change-resource-record-sets \
-  --hosted-zone-id Z036423752F97VU7GU3K \
+cat <<EOF
+aws route53 change-resource-record-sets \\
+  --hosted-zone-id $ROUTE53_ZONE_ID \\
   --change-batch '{
-    "Changes": [
-      {
-        "Action": "CREATE",
-        "ResourceRecordSet": {
-          "Name": "verum.sh.",
-          "Type": "A",
-          "TTL": 300,
-          "ResourceRecords": [
-            {"Value": "216.239.32.21"},
-            {"Value": "216.239.34.21"},
-            {"Value": "216.239.36.21"},
-            {"Value": "216.239.38.21"}
-          ]
-        }
+    "Changes": [{
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "$DOMAIN.",
+        "Type": "A",
+        "TTL": 300,
+        "ResourceRecords": [
+          {"Value": "216.239.32.21"},
+          {"Value": "216.239.34.21"},
+          {"Value": "216.239.36.21"},
+          {"Value": "216.239.38.21"}
+        ]
       }
-    ]
+    }]
   }'
 EOF
-echo
 
-# ─── 9. Reference URLs ─────────────────────────────────────────────
+echo
 bold "GCP Console URLs (project: $PROJECT_ID)"
-muted "  Cloud Run service:      https://console.cloud.google.com/run/detail/${REGION}/${SERVICE}/metrics?project=${PROJECT_ID}"
-muted "  Domain mapping:         https://console.cloud.google.com/run/domains?project=${PROJECT_ID}"
+muted "  App Engine versions:    https://console.cloud.google.com/appengine/versions?project=${PROJECT_ID}"
+muted "  Domain mappings:        https://console.cloud.google.com/appengine/settings/domains?project=${PROJECT_ID}"
+muted "  SSL certificates:       https://console.cloud.google.com/appengine/settings/certificates?project=${PROJECT_ID}"
 muted "  Search Console verify:  https://search.google.com/search-console/welcome"
-muted "  Artifact Registry:      https://console.cloud.google.com/artifacts?project=${PROJECT_ID}"
-muted "  Cloud Build history:    https://console.cloud.google.com/cloud-build/builds?project=${PROJECT_ID}"
-if [ -n "$RUN_URL" ]; then
-  echo
-  bold "Direct Cloud Run URL (use this until DNS propagates):"
-  echo "  $RUN_URL"
-fi
+
+echo
+bold "Direct GAE URL (use until DNS propagates):"
+echo "  https://${GAE_URL}"
 echo
 bold "Next:"
-muted "  1. Add Route 53 records above (verum.sh → 4 Google A records)"
-muted "  2. Verify domain ownership via Search Console (if not already)"
-muted "  3. Re-run this script to create the Cloud Run domain mapping"
-muted "  4. Wait for SSL provisioning (Google-managed cert, ~15 min)"
-muted "  5. Test: curl -fsSL https://${DOMAIN}/install | head -5"
+muted "  1. Add Route 53 A records above"
+muted "  2. Wait 5-15 min for DNS propagation"
+muted "  3. SSL cert auto-provisions when DNS resolves (~15-60 min)"
+muted "  4. Test: curl -fsSL https://${DOMAIN}/install | head -5"
 echo

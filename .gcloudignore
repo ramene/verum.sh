@@ -1,0 +1,12 @@
+# Files to skip when uploading source to App Engine deploy.
+# Keep .next/ so we ship the prebuilt artifact (GAE's nodejs22 runtime
+# runs `next start` and expects .next to exist).
+
+.git/
+.gitignore
+node_modules/
+deploy/
+README.md
+*.md
+.env*
+.next/cache/
