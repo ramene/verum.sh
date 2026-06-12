@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Terminal, Smartphone, Key, ShieldCheck, GitBranch } from 'lucide-react';
 import { ProblemsWeSolve } from '@/components/problems-we-solve';
+import { ComposesWith } from '@/components/composes-with';
 
 const CURL_INSTALL = 'curl -fsSL https://verum.sh/install | bash';
 
@@ -138,6 +139,9 @@ export default function HomePage() {
 
       {/* Problems we solve */}
       <ProblemsWeSolve />
+
+      {/* Composes with mae + appmaestro */}
+      <ComposesWith />
 
       {/* Lineage */}
       <section className="mx-auto max-w-3xl px-6 pb-24 text-center">
