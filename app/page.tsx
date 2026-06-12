@@ -27,6 +27,12 @@ export default function HomePage() {
               GitHub
             </Link>
             <Link
+              href="/pricing"
+              className="text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Pricing
+            </Link>
+            <Link
               href="/docs"
               className="text-muted-foreground transition-colors hover:text-foreground"
             >
