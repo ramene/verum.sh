@@ -1,0 +1,16 @@
+# Route the three apex hostnames (and www) to their respective GAE services.
+# Anything else falls through to the `default` service (verum-sh).
+#
+# Project: mae-stack-prod
+# Services: default (verum.sh), mae-sh, appmaestro-ai
+dispatch:
+  - url: "mae.sh/*"
+    service: mae-sh
+  - url: "www.mae.sh/*"
+    service: mae-sh
+  - url: "appmaestro.ai/*"
+    service: appmaestro-ai
+  - url: "www.appmaestro.ai/*"
+    service: appmaestro-ai
+  - url: "relay.verum.sh/*"
+    service: pair-relay
