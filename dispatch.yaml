@@ -1,8 +1,8 @@
-# Route the three apex hostnames (and www) to their respective GAE services.
+# Route the apex hostnames (and www) + the Connect subdomains to their GAE services.
 # Anything else falls through to the `default` service (verum-sh).
 #
 # Project: mae-stack-prod
-# Services: default (verum.sh), mae-sh, appmaestro-ai
+# Services: default (verum.sh), mae-sh, appmaestro-ai, pair-relay, mae-connect
 dispatch:
   - url: "mae.sh/*"
     service: mae-sh
@@ -14,3 +14,8 @@ dispatch:
     service: appmaestro-ai
   - url: "relay.verum.sh/*"
     service: pair-relay
+  # mae Connect rooms (Phase 4 M1) — meet = room UI, join = invite resolver.
+  - url: "meet.mae.sh/*"
+    service: mae-connect
+  - url: "join.mae.sh/*"
+    service: mae-connect
