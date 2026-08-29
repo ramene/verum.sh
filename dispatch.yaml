@@ -19,3 +19,10 @@ dispatch:
     service: mae-connect
   - url: "join.mae.sh/*"
     service: mae-connect
+  # karve.ai storefront apps. app.karve.ai was already live in the DEPLOYED
+  # dispatch but missing from this file — kept here so a dispatch deploy can
+  # never drop it again.
+  - url: "app.karve.ai/*"
+    service: meal-assembly
+  - url: "calm.karve.ai/*"
+    service: calm
