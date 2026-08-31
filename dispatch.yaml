@@ -26,3 +26,12 @@ dispatch:
     service: meal-assembly
   - url: "calm.karve.ai/*"
     service: calm
+  # Standalone property landings (static GAE services).
+  - url: "mediareserve.com/*"
+    service: mediareserve
+  - url: "www.mediareserve.com/*"
+    service: mediareserve
+  - url: "lachlandai.com/*"
+    service: lachlandai
+  - url: "www.lachlandai.com/*"
+    service: lachlandai
