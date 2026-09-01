@@ -26,6 +26,15 @@ dispatch:
     service: meal-assembly
   - url: "calm.karve.ai/*"
     service: calm
+  # llmfit + filedeposit were live in the DEPLOYED dispatch but missing from this
+  # file (same footgun as app.karve.ai) — a dispatch deploy dropped them and they
+  # fell through to `default` (verum.sh). Restored 2026-09-01.
+  - url: "llmfit.karve.ai/*"
+    service: rightsizer
+  - url: "filedeposit.com/*"
+    service: filedeposit
+  - url: "www.filedeposit.com/*"
+    service: filedeposit
   # Standalone property landings (static GAE services).
   - url: "mediareserve.com/*"
     service: mediareserve
