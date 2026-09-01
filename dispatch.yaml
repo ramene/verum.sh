@@ -44,3 +44,7 @@ dispatch:
     service: lachlandai
   - url: "www.lachlandai.com/*"
     service: lachlandai
+  - url: "socialcommons.com/*"
+    service: socialcommons
+  - url: "www.socialcommons.com/*"
+    service: socialcommons
