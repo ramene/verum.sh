@@ -44,6 +44,11 @@ dispatch:
     service: lachlandai
   - url: "www.lachlandai.com/*"
     service: lachlandai
+  # /proof/* -> dynamic verify service (must precede the catch-all; first-match wins)
+  - url: "socialcommons.com/proof/*"
+    service: proof
+  - url: "www.socialcommons.com/proof/*"
+    service: proof
   - url: "socialcommons.com/*"
     service: socialcommons
   - url: "www.socialcommons.com/*"
